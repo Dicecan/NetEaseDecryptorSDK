@@ -1,8 +1,10 @@
 *.iml
 .gradle
-/build
-/core/build
-/android-sdk/build
-.idea
-local.properties
+build/
+core/build/
+android-sdk/build/
+.idea/
 .DS_Store
+local.properties
+.externalNativeBuild
+.cxx

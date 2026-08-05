@@ -6,6 +6,39 @@
 
 ---
 
+## 📦 依赖引入 (Dependency Setup - JitPack)
+
+本 SDK 已托管至 **JitPack** 仓库，最新版本为 `2.0.0`。
+
+### 步骤 1: 配置仓库地址
+在项目根目录的 `settings.gradle.kts` 中配置 JitPack 镜像源：
+
+```kotlin
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        maven { url = uri("https://jitpack.io") }
+    }
+}
+```
+
+### 步骤 2: 添加模块依赖
+在应用的 `build.gradle.kts` 中根据需求引入对应的依赖项：
+
+```kotlin
+dependencies {
+    // 选项 A: Android 端完整 SDK (推荐：包含 DocumentFile (SAF) 适配、协程异步支持及 Shizuku/Root 物理路径访问)
+    implementation("com.github.Dicecan.NetEaseDecryptorSDK:android-sdk:2.0.0")
+
+    // 选项 B: 纯 JVM 核心模块 (适用：PC 工具、桌面端 Java 应用或服务端，没有任何 Android 框架依赖)
+    implementation("com.github.Dicecan.NetEaseDecryptorSDK:core:2.0.0")
+}
+```
+
+---
+
 ## 🛠️ 项目模块结构与优化特性
 
 项目采用多模块设计，将纯逻辑层与 Android 依赖解耦：

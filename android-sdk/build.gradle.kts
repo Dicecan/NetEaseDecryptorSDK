@@ -4,8 +4,8 @@ plugins {
     `maven-publish`
 }
 
-group = "com.github.Dicecan"
-version = "1.0.0"
+group = "com.github.Dicecan.NetEaseDecryptorSDK"
+version = "2.0.0"
 
 android {
     namespace = "com.neteasedecryptor.android"
