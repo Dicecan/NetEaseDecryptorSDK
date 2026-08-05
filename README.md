@@ -6,12 +6,12 @@
 
 ---
 
-## 🛠️ 项目模块结构
+## 🛠️ 项目模块结构与优化特性
 
 项目采用多模块设计，将纯逻辑层与 Android 依赖解耦：
 
-* **`:core`**：纯 Kotlin/JVM 实现，没有任何外部依赖。可在服务器、PC 工具或 Android 平台无缝复用。
-* **`:android-sdk`**：Android 端专用适配层，集成 `androidx.documentfile`，支持在 Android 10+ 的分区存储模式下直接处理经由 SAF 授权授权的 `Uri` 和 `DocumentFile` 目录。
+* **`:core`**：纯 Kotlin/JVM 实现，没有任何外部依赖。支持**流式分块解密 (Chunked Stream Decryption)** 与**就地异或 (In-place XOR)**，极致优化内存占用与 CPU 缓存命中率，彻底避免大型 LevelDB 日志文件解密导致的 OOM 问题。同时提供 `AbstractFile` 接口实现文件系统抽象。
+* **`:android-sdk`**：Android 端专用适配层。除了支持在传统 SAF 授权模式下使用 `DocumentFile` 目录外，还**完美适配 Android 15+ 平台**——在使用 **Shizuku / Root** 框架获取到 `/Android/data/` 物理目录访问权限时，可以直接传入原生 `java.io.File` 路径进行解密。
 
 ---
 
@@ -19,7 +19,8 @@
 
 ### 1. JVM 或 PC 应用集成 (`:core` 模块)
 
-对于桌面应用或不需要 Android 依赖的场景，可以直接通过 Java Stream 接口操作：
+#### 单文件解密
+对于桌面应用或不需要 Android 依赖的场景，可以直接通过流接口操作：
 
 ```kotlin
 import com.neteasedecryptor.sdk.NetEaseDecryptor
@@ -36,7 +37,7 @@ val manifestFile = dbDir.listFiles()?.find { it.name.startsWith("MANIFEST") } ?:
 val currentStream = FileInputStream(currentFile)
 val decryptKey = NetEaseDecryptor.deriveKey(currentStream, manifestFile.name)
 
-// 3. 对目标加密文件执行解密输出
+// 3. 对目标加密文件执行流式解密输出
 val encryptedFile = File(dbDir, "000003.log")
 val decryptedOutputFile = File("/path/to/output/000003.log")
 
@@ -50,10 +51,34 @@ if (isOk) {
 }
 ```
 
+#### 整存档解密
+在纯 JVM 环境下，也可以使用 `WorldDecryptor` 和 `JavaFileWrapper` 解密整个存档：
+
+```kotlin
+import com.neteasedecryptor.sdk.WorldDecryptor
+import com.neteasedecryptor.sdk.JavaFileWrapper
+import java.io.File
+
+val worldDir = JavaFileWrapper(File("/path/to/netease/world"))
+val exportDir = File("/path/to/export/world")
+
+WorldDecryptor.decryptWorld(
+    worldFolder = worldDir,
+    targetExportDir = exportDir,
+    listener = object : WorldDecryptor.DecryptListener {
+        override fun onProgress(progress: Int) { println("Progress: $progress%") }
+        override fun onLog(message: String) { println(message) }
+        override fun onSuccess(exportPath: String) { println("Exported to $exportPath") }
+        override fun onError(error: String) { println("Error: $error") }
+    }
+)
+```
+
+---
+
 ### 2. Android 客户端集成 (`:android-sdk` 模块)
 
-在 Android 应用中，使用 Storage Access Framework（SAF）选择存档目录，并利用 `AndroidWorldDecryptor` 进行异步后台解密：
-
+#### 方式 A：传统 SAF (`DocumentFile`) 模式 (Android 10 - 13)
 ```kotlin
 import androidx.lifecycle.lifecycleScope
 import androidx.documentfile.provider.DocumentFile
@@ -61,39 +86,43 @@ import com.neteasedecryptor.android.AndroidWorldDecryptor
 import kotlinx.coroutines.launch
 import java.io.File
 
-// 获取 Android 平台解密器实例
 val androidDecryptor = AndroidWorldDecryptor(context)
 
 lifecycleScope.launch {
     // worldFolderDoc 是用户通过 SAF 选择授权的 DocumentFile 根目录
     val worldFolderDoc = DocumentFile.fromTreeUri(context, treeUri)!!
-    
-    // 准备本地的导出绝对路径目标
     val targetExportDir = File(context.getExternalFilesDir(null), "DecryptedWorld")
 
     androidDecryptor.decryptWorld(
         worldFolderDoc = worldFolderDoc,
         targetExportDir = targetExportDir,
         listener = object : AndroidWorldDecryptor.DecryptListener {
-            override fun onProgress(progress: Int) {
-                // 更新 UI 进度条百分比 (0-100)
-                progressBar.progress = progress
-            }
+            override fun onProgress(progress: Int) { progressBar.progress = progress }
+            override fun onLog(message: String) { logTextView.append("\n$message") }
+            override fun onSuccess(exportPath: String) { Toast.makeText(context, "解密成功: $exportPath", Toast.LENGTH_LONG).show() }
+            override fun onError(error: String) { Toast.makeText(context, "错误: $error", Toast.LENGTH_SHORT).show() }
+        }
+    )
+}
+```
 
-            override fun onLog(message: String) {
-                // 打印解密日志
-                logTextView.append("\n$message")
-            }
+#### 方式 B：Android 15+ Shizuku / Root 模式 (`java.io.File`)
+在 Android 14/15+ 上，系统封禁了 SAF 对 `/Android/data` 的访问授权。通过 Shizuku 提升权限或 Root 挂载获取到存档物理路径后，可以直接使用 `File` 重载：
 
-            override fun onSuccess(exportPath: String) {
-                // 导出完成
-                Toast.makeText(context, "解密成功，已导出至: $exportPath", Toast.LENGTH_LONG).show()
-            }
+```kotlin
+lifecycleScope.launch {
+    // 通过 Shizuku API / Root 挂载访问到的物理存档目录
+    val shizukuWorldFile = File("/storage/emulated/0/Android/data/com.netease.x19/files/minecraftWorlds/xxx")
+    val targetExportDir = File(context.getExternalFilesDir(null), "DecryptedWorld")
 
-            override fun onError(error: String) {
-                // 出错处理
-                Toast.makeText(context, "解密错误: $error", Toast.LENGTH_SHORT).show()
-            }
+    androidDecryptor.decryptWorld(
+        worldFolderFile = shizukuWorldFile,
+        targetExportDir = targetExportDir,
+        listener = object : AndroidWorldDecryptor.DecryptListener {
+            override fun onProgress(progress: Int) { progressBar.progress = progress }
+            override fun onLog(message: String) { logTextView.append("\n$message") }
+            override fun onSuccess(exportPath: String) { Toast.makeText(context, "解密成功: $exportPath", Toast.LENGTH_LONG).show() }
+            override fun onError(error: String) { Toast.makeText(context, "错误: $error", Toast.LENGTH_SHORT).show() }
         }
     )
 }

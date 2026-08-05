@@ -1,12 +1,22 @@
 plugins {
     id("org.jetbrains.kotlin.jvm")
+    `maven-publish`
 }
 
-group = "com.neteasedecryptor.sdk"
+group = "com.github.Dicecan"
 version = "1.0.0"
 
-
 dependencies {
-    // Pure Kotlin, no external dependencies needed
     implementation(kotlin("stdlib"))
+}
+
+publishing {
+    publications {
+        create<MavenPublication>("maven") {
+            from(components["java"])
+            groupId = project.group.toString()
+            artifactId = "core"
+            version = project.version.toString()
+        }
+    }
 }
